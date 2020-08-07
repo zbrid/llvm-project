@@ -141,6 +141,7 @@ FunctionPass *createX86LoadValueInjectionLoadHardeningPass();
 FunctionPass *createX86LoadValueInjectionRetHardeningPass();
 FunctionPass *createX86SpeculativeLoadHardeningPass();
 FunctionPass *createX86SpeculativeExecutionSideEffectSuppression();
+FunctionPass *createX86SpecFuzzPass();
 
 void initializeEvexToVexInstPassPass(PassRegistry &);
 void initializeFixupBWInstPassPass(PassRegistry &);

@@ -59,6 +59,11 @@
 #include <iterator>
 #include <utility>
 
+// SpecFuzz patch - start
+#include <fstream>
+#include <iostream>
+// SpecFuzz patch - end
+
 using namespace llvm;
 
 #define PASS_KEY "x86-slh"
@@ -119,6 +124,23 @@ static cl::opt<bool> HardenIndirectCallsAndJumps(
              "mitigate Spectre v1.2 style attacks."),
     cl::init(true), cl::Hidden);
 
+// SpecFuzz patch - start
+static cl::opt<std::string> WhitelistBranchesFile(
+    PASS_KEY "-whitelist-branches",
+    cl::desc("Skip hardening of the branches listed in this file."),
+    cl::init(""), cl::Hidden);
+
+static cl::opt<std::string> WhitelistLoadsFile(
+    PASS_KEY "-whitelist-loads",
+    cl::desc("Skip hardening of the loads listed in this file."),
+    cl::init(""), cl::Hidden);
+
+static cl::opt<std::string> WhitelistModulesFile(
+    PASS_KEY "-whitelist-modules",
+    cl::desc("Skip hardening of the modules listed in this file."),
+    cl::init(""), cl::Hidden);
+// SpecFuzz patch - end
+
 namespace {
 
 class X86SpeculativeLoadHardeningPass : public MachineFunctionPass {
@@ -165,6 +187,16 @@ private:
   const TargetRegisterInfo *TRI = nullptr;
 
   Optional<PredState> PS;
+
+ // SpecFuzz patch - start
+  bool WhitelistsInitialized = false;
+  std::set<std::string> WhitelistBranches;
+  std::set<std::string> WhitelistLoads;
+  std::set<std::string> WhitelistModules;
+
+  void initializeWhitelists();
+  std::string getLocationName(DebugLoc Loc);
+  // SpecFuzz patch - end
 
   void hardenEdgesWithLFENCE(MachineFunction &MF);
 
@@ -395,6 +427,62 @@ static bool hasVulnerableLoad(MachineFunction &MF) {
   return false;
 }
 
+// SpecFuzz patch - start
+void X86SpeculativeLoadHardeningPass::initializeWhitelists() {
+    if (WhitelistsInitialized)
+        return;
+
+    // Branches
+    std::string line;
+    if (not WhitelistBranchesFile.empty()) {
+        std::ifstream inFile(WhitelistBranchesFile, std::ios_base::in);
+        while (getline(inFile, line)) {
+            if (line.empty()) continue;
+            WhitelistBranches.insert(line);
+        }
+    }
+
+    // Loads
+    if (not WhitelistLoadsFile.empty()) {
+        std::ifstream inFile(WhitelistLoadsFile, std::ios_base::in);
+        while (getline(inFile, line)) {
+            if (line.empty()) continue;
+            WhitelistLoads.insert(line);
+        }
+    }
+
+    // Modules
+    if (not WhitelistModulesFile.empty()) {
+        std::ifstream inFile(WhitelistModulesFile, std::ios_base::in);
+        while (getline(inFile, line)) {
+            if (line.empty()) continue;
+            WhitelistModules.insert(line);
+        }
+    }
+
+    WhitelistsInitialized = true;
+}
+
+std::string X86SpeculativeLoadHardeningPass::getLocationName(DebugLoc Loc) {
+  std::string LocName = "";
+  return LocName;
+// TODO(zbrid): Fix the error when this part builds.
+//  if (not Loc)
+//      return LocName;
+//
+//  LocName = cast<DIScope>(Loc.getScope())->getDirectory();
+//  LocName.append("/");
+//  LocName.append(cast<DIScope>(Loc.getScope())->getFilename().str());
+//  LocName.append(":");
+//  LocName.append(std::to_string(Loc.getLine()));
+//  LocName.append(":");
+//  LocName.append(std::to_string(Loc.getCol()));
+//  return LocName;
+}
+
+// SpecFuzz patch - end
+
+
 bool X86SpeculativeLoadHardeningPass::runOnMachineFunction(
     MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** " << getPassName() << " : " << MF.getName()
@@ -405,6 +493,23 @@ bool X86SpeculativeLoadHardeningPass::runOnMachineFunction(
   if (!EnableSpeculativeLoadHardening &&
       !MF.getFunction().hasFnAttribute(Attribute::SpeculativeLoadHardening))
     return false;
+
+  // SpecFuzz patch - start
+  initializeWhitelists();
+
+  if (not WhitelistModules.empty()) {
+    std::string FunctionName = MF.getName().str();
+    bool Found = false;
+    for (auto ModuleName : WhitelistModules) {
+      if (FunctionName == ModuleName) {
+        Found = true;
+        break;
+      }
+    }
+    if (not Found)
+      return false;
+  }
+  // SpecFuzz patch - end
 
   Subtarget = &MF.getSubtarget<X86Subtarget>();
   MRI = &MF.getRegInfo();
@@ -579,6 +684,24 @@ void X86SpeculativeLoadHardeningPass::hardenEdgesWithLFENCE(
     if (TermIt == MBB.end() || !TermIt->isBranch())
       continue;
 
+    // SpecFuzz patch - start
+    if (not WhitelistBranches.empty()) {
+      bool isWhitelisted = false;
+      for (MachineInstr &MI : MBB) {
+        std::string LocName = getLocationName(MI.getDebugLoc());
+        if (WhitelistBranches.count(LocName)) {
+          LLVM_DEBUG(dbgs() << "Listed branch: " << LocName << "\n");
+          isWhitelisted = true;
+          break;
+        } else {
+          LLVM_DEBUG(dbgs() << "Not listed branch: " << LocName << "\n");
+        }
+      }
+      if (isWhitelisted)
+        continue;  // skip this branch
+    }
+    // SpecFuzz patch - end
+
     // Add all the non-EH-pad succossors to the blocks we want to harden. We
     // skip EH pads because there isn't really a condition of interest on
     // entering.
@@ -605,6 +728,24 @@ X86SpeculativeLoadHardeningPass::collectBlockCondInfo(MachineFunction &MF) {
     // If there are no or only one successor, nothing to do here.
     if (MBB.succ_size() <= 1)
       continue;
+
+    // SpecFuzz patch - start
+    if (not WhitelistBranches.empty()) {
+      bool isWhitelisted = false;
+      for (MachineInstr &MI : MBB) {
+        std::string LocName = getLocationName(MI.getDebugLoc());
+        if (WhitelistBranches.count(LocName)) {
+          LLVM_DEBUG(dbgs() << "Listed branch: " << LocName << "\n");
+          isWhitelisted = true;
+          break;
+        } else {
+          LLVM_DEBUG(dbgs() << "Not listed branch: " << LocName << "\n");
+        }
+      }
+      if (isWhitelisted)
+        continue;  // skip this branch
+    }
+    // SpecFuzz patch - end
 
     // We want to reliably handle any conditional branch terminators in the
     // MBB, so we manually analyze the branch. We can handle all of the
@@ -1317,6 +1458,22 @@ void X86SpeculativeLoadHardeningPass::tracePredStateThroughBlocksAndHarden(
         // Some instructions which "load" are trivially safe or unimportant.
         if (MI.getOpcode() == X86::MFENCE)
           continue;
+
+        // SpecFuzz patch - start
+        if (not WhitelistLoads.empty()) {
+          bool isWhitelisted = false;
+          std::string LocName = getLocationName(MI.getDebugLoc());
+          if (WhitelistLoads.count(LocName)) {
+            LLVM_DEBUG(dbgs() << "Listed load: " << LocName << "\n");
+            isWhitelisted = true;
+            break;
+          } else {
+            LLVM_DEBUG(dbgs() << "Not listed load: " << LocName << "\n");
+          }
+          if (isWhitelisted)
+            continue;  // skip this load
+        }
+        // SpecFuzz patch - end
 
         // Extract the memory operand information about this instruction.
         // FIXME: This doesn't handle loading pseudo instructions which we often

@@ -56,6 +56,16 @@ static cl::opt<bool> EnableMachineCombinerPass("x86-machine-combiner",
                                cl::desc("Enable the machine combiner pass"),
                                cl::init(true), cl::Hidden);
 
+// SpecFuzz patch - start
+static cl::opt<bool> EnableSpeculativeLoadHardening(
+    "x86-speculative-load-hardening",
+    cl::desc("Enable speculative load hardening"), cl::init(false), cl::Hidden);
+
+static cl::opt<bool> EnableSpecFuzz(
+    "x86-specfuzz",
+    cl::desc("Enable SpecFuzz"), cl::init(false), cl::Hidden);
+// SpecFuzz patch - end
+
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeX86Target() {
   // Register the target.
   RegisterTargetMachine<X86TargetMachine> X(getTheX86_32Target());
@@ -539,6 +549,10 @@ void X86PassConfig::addPreEmitPass2() {
   // hand inspection of the codegen output.
   addPass(createX86SpeculativeExecutionSideEffectSuppression());
   addPass(createX86IndirectThunksPass());
+  // SpecFuzz patch - start
+  if (EnableSpecFuzz)
+    addPass(createX86SpecFuzzPass());
+  // SpecFuzz patch - end
 
   // Insert extra int3 instructions after trailing call instructions to avoid
   // issues in the unwinder.

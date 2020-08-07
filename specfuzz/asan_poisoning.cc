@@ -1,8 +1,9 @@
-//===-- asan_poisoning.cpp ------------------------------------------------===//
+//===-- asan_poisoning.cc -------------------------------------------------===//
 //
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,9 +22,7 @@
 namespace __asan {
 
 static atomic_uint8_t can_poison_memory;
-// SpecFuzz patch - start
 extern long* nesting_level;
-// SpecFuzz patch - end
 
 void SetCanPoisonMemory(bool value) {
   atomic_store(&can_poison_memory, value, memory_order_release);
@@ -65,6 +64,12 @@ struct ShadowSegmentEndpoint {
   }
 };
 
+void FlushUnneededASanShadowMemory(uptr p, uptr size) {
+  // Since asan's mapping is compacting, the shadow chunk may be
+  // not page-aligned, so we only flush the page-aligned portion.
+  ReleaseMemoryPagesToOS(MemToShadow(p), MemToShadow(p + size));
+}
+
 void AsanPoisonOrUnpoisonIntraObjectRedzone(uptr ptr, uptr size, bool poison) {
   uptr end = ptr + size;
   if (Verbosity()) {
@@ -89,7 +94,7 @@ void AsanPoisonOrUnpoisonIntraObjectRedzone(uptr ptr, uptr size, bool poison) {
 }  // namespace __asan
 
 // ---------------------- Interface ---------------- {{{1
-using namespace __asan;
+using namespace __asan;  // NOLINT
 
 // Current implementation of __asan_(un)poison_memory_region doesn't check
 // that user program (un)poisons the memory it owns. It poisons memory
@@ -103,12 +108,11 @@ using namespace __asan;
 // at most [AlignDown(left), right).
 void __asan_poison_memory_region(void const volatile *addr, uptr size) {
   if (!flags()->allow_user_poisoning || size == 0) return;
-  // SpecFuzz patch - start
   if (*nesting_level != 0) {
     UNREACHABLE("poisoning shadow memory within SpecFuzz simulation");
     return;
   }
-  // SpecFuzz patch - end
+
   uptr beg_addr = (uptr)addr;
   uptr end_addr = beg_addr + size;
   VPrintf(3, "Trying to poison memory region [%p, %p)\n", (void *)beg_addr,
@@ -269,12 +273,10 @@ extern "C" SANITIZER_INTERFACE_ATTRIBUTE
 void __asan_poison_cxx_array_cookie(uptr p) {
   if (SANITIZER_WORDSIZE != 64) return;
   if (!flags()->poison_array_cookie) return;
-  // SpecFuzz patch - start
   if (*nesting_level != 0) {
     UNREACHABLE("poisoning shadow memory within SpecFuzz simulation");
     return;
   }
-  // SpecFuzz patch - end
   uptr s = MEM_TO_SHADOW(p);
   *reinterpret_cast<u8*>(s) = kAsanArrayCookieMagic;
 }
@@ -351,12 +353,10 @@ void __asan_set_shadow_f8(uptr addr, uptr size) {
 }
 
 void __asan_poison_stack_memory(uptr addr, uptr size) {
-  // SpecFuzz patch - start
   if (*nesting_level != 0) {
     UNREACHABLE("poisoning shadow memory within SpecFuzz simulation");
     return;
   }
-  // SpecFuzz patch - end
   VReport(1, "poisoning: %p %zx\n", (void *)addr, size);
   PoisonAlignedStackMemory(addr, size, true);
 }
@@ -459,12 +459,10 @@ int __sanitizer_verify_contiguous_container(const void *beg_p,
 
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE
 void __asan_poison_intra_object_redzone(uptr ptr, uptr size) {
-  // SpecFuzz patch - start
   if (*nesting_level != 0) {
     UNREACHABLE("poisoning shadow memory within SpecFuzz simulation");
     return;
   }
-  // SpecFuzz patch - end
   AsanPoisonOrUnpoisonIntraObjectRedzone(ptr, size, true);
 }
 

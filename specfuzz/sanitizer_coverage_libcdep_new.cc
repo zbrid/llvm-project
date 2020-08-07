@@ -1,14 +1,14 @@
-//===-- sanitizer_coverage_libcdep_new.cpp --------------------------------===//
+//===-- sanitizer_coverage_libcdep_new.cc ---------------------------------===//
 //
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
 // Sanitizer Coverage Controller for Trace PC Guard.
 
 #include "sanitizer_platform.h"
-#include <dlfcn.h>
 
 #if !SANITIZER_FUCHSIA
 #include "sancov_flags.h"
@@ -16,6 +16,8 @@
 #include "sanitizer_atomic.h"
 #include "sanitizer_common.h"
 #include "sanitizer_file.h"
+
+#include <dlfcn.h>
 
 using namespace __sanitizer;
 
@@ -117,8 +119,8 @@ class TracePcGuardController {
     InitializeSancovFlags();
 
     pc_vector.Initialize(0);
-    nesting_level = (long*)dlsym(RTLD_DEFAULT, "nesting_level");
-    disable_speculation = (long*)dlsym(RTLD_DEFAULT, "disable_speculation");
+    nesting_level = (long *) dlsym(RTLD_DEFAULT, "nesting_level");
+    disable_speculation = (long *) dlsym(RTLD_DEFAULT, "disable_speculation");
   }
 
   void InitTracePcGuard(u32* start, u32* end) {
@@ -172,8 +174,8 @@ void InitializeCoverage(bool enabled, const char *dir) {
 } // namespace __sanitizer
 
 extern "C" {
-SANITIZER_INTERFACE_ATTRIBUTE void __sanitizer_dump_coverage(const uptr* pcs,
-                                                             uptr len) {
+SANITIZER_INTERFACE_ATTRIBUTE void __sanitizer_dump_coverage(  // NOLINT
+    const uptr* pcs, uptr len) {
   return __sancov::SanitizerDumpCoverage(pcs, len);
 }
 
@@ -215,7 +217,6 @@ SANITIZER_INTERFACE_WEAK_DEF(void, __sanitizer_cov_trace_div8, void) {}
 SANITIZER_INTERFACE_WEAK_DEF(void, __sanitizer_cov_trace_gep, void) {}
 SANITIZER_INTERFACE_WEAK_DEF(void, __sanitizer_cov_trace_pc_indir, void) {}
 SANITIZER_INTERFACE_WEAK_DEF(void, __sanitizer_cov_8bit_counters_init, void) {}
-SANITIZER_INTERFACE_WEAK_DEF(void, __sanitizer_cov_bool_flag_init, void) {}
 SANITIZER_INTERFACE_WEAK_DEF(void, __sanitizer_cov_pcs_init, void) {}
 }  // extern "C"
 // Weak definition for code instrumented with -fsanitize-coverage=stack-depth
